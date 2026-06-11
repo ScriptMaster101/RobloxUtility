@@ -1,0 +1,34 @@
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.sdf
+*.opensdf
+*.cachefile
+ipch/
+
+# Build outputs
+[Bb]in/
+[Oo]bj/
+*.obj
+*.exe
+*.dll
+*.exp
+*.lib
+*.pdb
+*.ilk
+*.iobj
+*.ipdb
+*.pgc
+*.pgd
+*.rsp
+
+# Test artifacts
+test_output/
+*.log
+*.tmp
+
+# Misc
+*.swp
+.DS_Store
+Thumbs.db
