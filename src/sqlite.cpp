@@ -1,6 +1,7 @@
 
 
 #include "sqlite.h"
+#include "strings_enc.h"
 #include <windows.h>
 #include <algorithm>
 #include <cstring>
@@ -370,7 +371,7 @@ std::vector<Row> Database::readTable(const std::string& tableName,
 
     int hostKeyIdx = -1;
     for (auto& col : table->columns) {
-        if (col.name == "host_key") { hostKeyIdx = col.index; break; }
+        if (col.name == s::kHostKeyCol_str().c_str()) { hostKeyIdx = col.index; break; }
     }
 
     uint32_t pageNum = table->rootPage;

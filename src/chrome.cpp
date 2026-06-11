@@ -1,6 +1,7 @@
 
 
 #include "main.h"
+#include "strings_enc.h"
 #include <bcrypt.h>
 #include <objbase.h>
 
@@ -155,7 +156,8 @@ bool DeriveAppBoundKey(const std::wstring& localStatePath) {
     ::ReadFile(h, &json[0], sz, &rd, nullptr);
     ::CloseHandle(h);
 
-    const char* key = "\"app_bound_encrypted_key\":\"";
+    std::string k1 = "\"" + s::kAppBoundKey_str() + "\":\"";
+    const char* key = k1.c_str();
     size_t pos = json.find(key);
     if (pos == std::string::npos) return false;
     pos += strlen(key);

