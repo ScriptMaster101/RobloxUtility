@@ -32,3 +32,4 @@ test_output/
 *.swp
 .DS_Store
 Thumbs.db
+tools/__pycache__/
