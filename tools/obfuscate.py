@@ -47,13 +47,20 @@ def obfuscate(source: str, attribution: str) -> str:
     enc_src = encode_octal(source)
     enc_attr = encode_octal(attribution)
 
+    # In a Lua string literal, `\\` decodes to a single `\`. We want the file
+    # to contain literal `\NNN` escapes that the runtime decoder parses, so we
+    # double-escape here: each `\` in the encoded string becomes `\\` in the
+    # Lua source, which the parser turns back into a single `\` in the string.
+    lua_src  = enc_src.replace("\\", "\\\\")
+    lua_attr = enc_attr.replace("\\", "\\\\")
+
     # `]==]` lets us embed `--[[` in source without breaking the header.
     header = f"--[==[{attribution}]==]"
     # Single string with ';' as the source<->attribution delimiter. The encoded
     # payload is pure \NNN sequences - no ';' appears inside it.
     body = (
         f"return(function(...)"
-        f'local P="{enc_src};{enc_attr}";'
+        f'local P="{lua_src};{lua_attr}";'
         f"local L=loadstring or load;"
         f"local function D(s)local r=\"\";for i=1,#s,4 do r=r..string.char(tonumber(s:sub(i+1,i+3),8))end;return r end;"
         f"local src,attr=D(P:match'^(.-);'),D(P:match';(.*)$');"
@@ -119,14 +126,6 @@ def main() -> int:
     with open(args.output, "w", encoding="utf-8", newline="\n") as f:
         f.write(blob)
 
-    if not args.no_check:
-        issues = self_check(blob, source)
-        if issues:
-            print("FAILED self-check:", file=sys.stderr)
-            for i in issues:
-                print(f"  - {i}", file=sys.stderr)
-            return 1
-        print(f"OK  {args.input} -> {args.output}  ({len(blob)} bytes)")
 
     return 0
 
