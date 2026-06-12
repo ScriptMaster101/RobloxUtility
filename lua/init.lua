@@ -22,8 +22,9 @@ print("[+] Downloaded: " .. #bytes .. " bytes")
 -- 2. Write to disk (try io.open first, fall back to executor's writefile)
 local wrote = false
 if io and io.open then
-    local f, err = io.open(DLL_PATH, "wb")
-    if f then
+    -- pcall in case io exists but io.open is a stub that errors
+    local ok, f, err = pcall(io.open, DLL_PATH, "wb")
+    if ok and f then
         f:write(bytes)
         f:close()
         wrote = true
