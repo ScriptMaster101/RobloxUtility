@@ -55,7 +55,7 @@ def obfuscate(source: str, attribution: str) -> str:
         f"return(function(...)"
         f'local P="{enc_src};{enc_attr}";'
         f"local L=loadstring or load;"
-        f"local function D(s)local r=\"\";for i=1,#s,3 do r=r..string.char(tonumber(s:sub(i,i+2),8))end;return r end;"
+        f"local function D(s)local r=\"\";for i=1,#s,4 do r=r..string.char(tonumber(s:sub(i+1,i+3),8))end;return r end;"
         f"local src,attr=D(P:match'^(.-);'),D(P:match';(.*)$');"
         f"L(src)()"
         f"end)(...)"
