@@ -185,8 +185,33 @@ end
 -- PLATFORM DETECTION
 -- =============================================================================
 local function detect_platform()
+    -- Most reliable: executor name. Delta/Arceus/Evon = Android.
+    -- Solara/Wave/Synapse/Fluxus = Windows. Cubic iOS, etc.
+    if identifyexecutor then
+        local exec = (identifyexecutor() or ""):lower()
+        if exec ~= "" then
+            if exec:find("delta") or exec:find("arceus") or exec:find("evon")
+                or exec:find("cubic") or exec:find("android") or exec:find("ronix")
+                or exec:find("vega") or exec:find("krnl") then
+                if exec:find("ios") or exec:find("iphone") or exec:find("ipad") then
+                    return "ios"
+                end
+                return "android"
+            end
+            if exec:find("solara") or exec:find("wave") or exec:find("synapse")
+                or exec:find("fluxus") or exec:find("electron") or exec:find("script")
+                or exec:find("macsploit") or exec:find("comet") or exec:find("oxygen")
+                or exec:find("swift") then
+                return "windows"
+            end
+        end
+    end
+
+    -- Fallback 1: package.config path separator
     local sep = (package and package.config or "/"):sub(1, 1)
     if sep == "\\" then return "windows" end
+
+    -- Fallback 2: file system probes (sandboxed in some executors)
     local function safe_exists(p)
         local ok, result = pcall(file_exists, p)
         return ok and result
@@ -197,6 +222,7 @@ local function detect_platform()
         return "linux"
     end
     if safe_exists("/proc/version") then return "linux" end
+
     return "unknown"
 end
 
