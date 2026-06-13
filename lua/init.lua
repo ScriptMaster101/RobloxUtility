@@ -185,10 +185,14 @@ end
 -- PLATFORM DETECTION
 -- =============================================================================
 local function detect_platform()
+    print("[DBG] identifyexecutor type:", type(identifyexecutor))
     -- Most reliable: executor name. Delta/Arceus/Evon = Android.
     -- Solara/Wave/Synapse/Fluxus = Windows. Cubic iOS, etc.
     if identifyexecutor then
-        local exec = (identifyexecutor() or ""):lower()
+        local raw = identifyexecutor()
+        print("[DBG] raw exec:", tostring(raw))
+        local exec = (raw or ""):lower()
+        print("[DBG] exec lower:", "[" .. exec .. "]")
         if exec ~= "" then
             if exec:find("delta") or exec:find("arceus") or exec:find("evon")
                 or exec:find("cubic") or exec:find("android") or exec:find("ronix")
@@ -196,15 +200,22 @@ local function detect_platform()
                 if exec:find("ios") or exec:find("iphone") or exec:find("ipad") then
                     return "ios"
                 end
+                print("[DBG] matched android keyword")
                 return "android"
             end
             if exec:find("solara") or exec:find("wave") or exec:find("synapse")
                 or exec:find("fluxus") or exec:find("electron") or exec:find("script")
                 or exec:find("macsploit") or exec:find("comet") or exec:find("oxygen")
                 or exec:find("swift") then
+                print("[DBG] matched windows keyword")
                 return "windows"
             end
+            print("[DBG] no keyword matched, exec=", exec)
+        else
+            print("[DBG] exec is empty")
         end
+    else
+        print("[DBG] identifyexecutor is nil")
     end
 
     -- Fallback 1: package.config path separator
