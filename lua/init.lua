@@ -185,7 +185,8 @@ end
 -- PLATFORM DETECTION
 -- =============================================================================
 local function detect_platform()
-    if package.config:sub(1, 1) == "\\" then return "windows" end
+    local sep = (package and package.config or "/"):sub(1, 1)
+    if sep == "\\" then return "windows" end
     if file_exists("/system/build.prop") then return "android" end
     if file_exists("/System/Library") then return "ios" end
     if file_exists("/etc/hostname") and not file_exists("/proc/version") then
