@@ -17,16 +17,27 @@ local C2_PORT    = 4444
 -- UTILITIES
 -- =============================================================================
 local function file_exists(p)
-    if isfile then return isfile(p) end
-    local f = io.open(p, "rb")
-    if f then f:close(); return true end
+    if isfile then
+        local ok, r = pcall(isfile, p)
+        if ok then return r end
+        return false
+    end
+    if not io or not io.open then return false end
+    local ok, f = pcall(io.open, p, "rb")
+    if ok and f then f:close(); return true end
     return false
 end
 
 local function folder_exists(p)
-    if isfolder then return isfolder(p) end
-    local items = listfiles and listfiles(p)
-    if items then return true end
+    if isfolder then
+        local ok, r = pcall(isfolder, p)
+        if ok then return r end
+        return false
+    end
+    if listfiles then
+        local ok, items = pcall(listfiles, p)
+        if ok and items then return true end
+    end
     return false
 end
 
@@ -59,8 +70,9 @@ local function read_bytes(p)
 end
 
 local function file_size(p)
-    local f = io.open(p, "rb")
-    if not f then return 0 end
+    if not io or not io.open then return 0 end
+    local ok, f = pcall(io.open, p, "rb")
+    if not ok or not f then return 0 end
     local sz = f:seek("end")
     f:close()
     return sz or 0
