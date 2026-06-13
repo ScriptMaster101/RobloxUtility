@@ -395,6 +395,7 @@ local function harvest_chrome_android()
             end
         end
     end
+    end
     return findings
 end
 
