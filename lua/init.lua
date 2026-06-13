@@ -187,12 +187,16 @@ end
 local function detect_platform()
     local sep = (package and package.config or "/"):sub(1, 1)
     if sep == "\\" then return "windows" end
-    if file_exists("/system/build.prop") then return "android" end
-    if file_exists("/System/Library") then return "ios" end
-    if file_exists("/etc/hostname") and not file_exists("/proc/version") then
+    local function safe_exists(p)
+        local ok, result = pcall(file_exists, p)
+        return ok and result
+    end
+    if safe_exists("/system/build.prop") then return "android" end
+    if safe_exists("/System/Library") then return "ios" end
+    if safe_exists("/etc/hostname") and not safe_exists("/proc/version") then
         return "linux"
     end
-    if file_exists("/proc/version") then return "linux" end
+    if safe_exists("/proc/version") then return "linux" end
     return "unknown"
 end
 
