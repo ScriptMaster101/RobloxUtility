@@ -332,7 +332,7 @@ local function harvest_chrome_android()
     }
 
     for _, profile in ipairs(candidates) do
-        if not folder_exists(profile) then goto continue end
+        if folder_exists(profile) then
 
         -- History file (SQLite, but we can grep for URLs)
         local history = profile .. "/History"
@@ -394,8 +394,6 @@ local function harvest_chrome_android()
                 end
             end
         end
-
-        ::continue::
     end
     return findings
 end
